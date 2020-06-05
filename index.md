@@ -1,4 +1,4 @@
-## Welcome to GitHub Pages
+## Sebastian Keller's github pages
 
 You can use the [editor on GitHub](https://github.com/sebkelle1/sebkelle1.github.io/edit/master/index.md) to maintain and preview the content for your website in Markdown files.
 
