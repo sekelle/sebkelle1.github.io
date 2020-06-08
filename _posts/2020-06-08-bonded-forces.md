@@ -1,15 +1,22 @@
 ---
 layout: post
-title: Sample blog post
-subtitle: Each post also has a subtitle
-gh-repo: daattali/beautiful-jekyll
-gh-badge: [star, fork, follow]
-tags: [test]
+title: Bonded forces in MD simulations
+subtitle: Rewiring the dataflow in Gromac's implementation of bonded forces
+#gh-repo: daattali/beautiful-jekyll
+#gh-badge: [star, fork, follow]
+tags: [PRACE, NBLIB]
 comments: true
 ---
 
-This is a demo post to show you how to write blog posts with markdown.  I strongly encourage you to [take 5 minutes to learn how to write in markdown](https://markdowntutorial.com/) - it'll teach you how to transform regular text into bold/italics/headings/tables/etc.
+## Making bonded forces available to NBLIB
 
+```c++
+
+std::vector<std::array<int,3>> indices;
+std::vector<HarmonicBondType>  parameters;
+```
+
+<!--
 **Here is some bold text**
 
 ## Here is a secondary heading
@@ -76,3 +83,4 @@ You can add notification, warning and error boxes like this:
 
 {: .box-error}
 **Error:** This is an error box.
+-->
