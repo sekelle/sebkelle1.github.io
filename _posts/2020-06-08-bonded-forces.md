@@ -103,10 +103,10 @@ At this point, we where asking ourselves:
 In fact, we quickly realized that we'd be doing ourselves a big disservice if we just threw away the interaction types
 by which we'd already neatly grouped all the listed interactions. C++ compilers have become powerful code generators,
 but they operate on types. If we don't have different types, we forego the possibility of leveraging the compiler
-to generate separate code paths optimizied and tailored to each listed interaction type.
+to generate separate code paths optimized and tailored to each listed interaction type.
 
 
-## A type-aware approach to bonded forces
+## A type-aware approach to listed forces
 
 
 In essence, the implementation of `calc_listed(const InteractionDefinitions& idef, ...)` in Gromacs looks like this:
@@ -132,7 +132,160 @@ void calc_listed(const InteractionDefinitions& idef, ...)
 }
 ```
 
+Since `ftype` is a runtime value, the whole interaction type dispatch that's controlled through it is managed
+by branches and function pointer tables, i.e. the implementation above contains a lot of control flow logic
+of the form `if (isPairInteraction(ftype)) {...}`. If on the one hand each interaction type is its own C++ type, we additionally
+have overloads available to control flow or template instantiations to create separate code paths that don't
+require their flow to be controlled anymore.
 
+On the other hand, we can't just loop over different C++ types. This is illustrated by the fact that we
+can't, for instance, write a `for` loop over the `ListedInteractions` tuple from above:
+
+```c++
+for (int i = 0; i < interactions.size(); ++i)
+{
+    // error: i is not a compile time constant
+    calc_one_type(std::get<i>(interactions));
+}
+```
+
+Back in the 90s, the only option would have been to manually unroll the tuple loop.
+Given that there's several dozen different types of interactions implemented in Gromacs, this would have been
+quite cumbersome and the union data type and function pointer table approach for `InteractionDefinitions` was the only
+practicable solution.
+
+Luckily, things have changed. Consider the following code.
+
+```c++
+template<class Buffer>
+auto reduceListedForces(const ListedInteractions& interactions,
+                        const std::vector<gmx::RVec>& x,
+                        Buffer* forces)
+{
+    std::array<real, std::tuple_size<ListedInteractions>::value> energies;
+
+    // calculate one bond type
+    auto computeForceType = [forces, &x, &energies](const auto& ielem) {
+        real energy = computeForces(ielem.indices, ielem.parameters, x, forces);
+        energies[FindIndex<std::decay_t<decltype(ilem)>, ListedInteractions>{}] = energy;
+    };
+
+    // calculate all bond types, returns a tuple with the energies for each type
+    for_each_tuple(computeForceType, interactions);
+
+    return energies;
+}
+```
+
+With the help of a generic lambda and C++17's `std::apply` in the one-liner `for_each_tuple`, we can
+generate the loop over the different types in the tuple quite effortlessly. While `reduceListedForces`
+implements a loop over the interaction types, the next layer, `computeForces` implements a loop over all
+interactions of a given type:
+
+
+```c++
+template <class Index, class InteractionType, class Buffer>
+real computeForces(const std::vector<Index>& indices,
+                const std::vector<InteractionType>& iParams,
+                const std::vector<gmx::RVec>& x,
+                Buffer* forces)
+{
+    real Epot = 0.0;
+
+    for (const auto& index : indices)
+    {
+        Epot += dispatchInteraction(index, iParams, x, forces);
+    }
+
+    return Epot;
+}
+```
+
+We're now down to the level of individual bonds, angles and dihedrals. At this
+point, the next steps depend on the actual type of the interaction.
+But instead of dispatching each harmonic bond, cubic bond, harmonic angle and so on
+to their seperate paths just yet, we just differentiate based on the number of interaction
+centers for now. Through overload resolution, the appropriate version `dispatchInteraction`
+gets called now, such as this one for the case of 2-center interactions:
+
+```c++
+template <class Buffer, class TwoCenterType>
+std::enable_if_t<IsTwoCenter<TwoCenterType>::value, real>
+dispatchInteraction(const InteractionIndex<TwoCenterType>& index,
+                    const std::vector<TwoCenterType>& bondInstances,
+                    const std::vector<gmx::RVec>& x,
+                    Buffer* forces,
+                    PbcHolder pbc)
+{
+    int i = std::get<0>(index);
+    int j = std::get<1>(index);
+    const gmx::RVec& x1 = x[i];
+    const gmx::RVec& x2 = x[j];
+    const TwoCenterType& bond = bondInstances[std::get<2>(index)];
+
+    gmx::RVec dx;
+    // calculate x1 - x2 modulo pbc
+    pbc.dxAiuc(x1, x2, dx);
+    real dr2 = dot(dx, dx);
+    real dr  = std::sqrt(dr2);
+
+    real force = 0.0, energy = 0.0;
+    std::tie(force, energy) = bondKernel(dr, bond);
+
+    // avoid division by 0
+    if (dr2 != 0.0)
+    {
+        force /= dr;
+        detail::spreadTwoCenterForces(force, dx, &(*forces)[i], &(*forces)[j]);
+    }
+
+    return energy;
+}
+```
+
+We can see that coordinate retrieval, computation of the scalar distance and the spreading
+of the scalar part of the force to the two centers is actually shared between all the different
+types of 2-center interactions. The only remaining thing to do now is to call the actual kernel
+to compute the force. Since `bond` has a distinct type, we can again use overload resolution:
+
+```c++
+template <class T>
+auto bondKernel(T dr, const HarmonicBond& bond)
+{
+    return harmonicScalarForce(bond.forceConstant(), bond.equilDistance(), dr);
+}
+```
+
+and call the actual kernel, which in its simplest form for a harmonic bond looks like this:
+
+```c++
+template <class T>
+std::tuple<T, T> harmonicScalarForce(T k, T x0, T x)
+{
+    real dx  = x - x0;
+    real dx2 = dx * dx;
+
+    real force = -k * dx;
+    real epot = 0.5 * k * dx2;
+
+    return std::make_tuple(force, epot);
+
+    /* That was 6 flops */
+}
+```
+
+That's it! From here on, we just had to add a separate dispatch for the 3- to 5-center interactions
+and add the type-aware wrappers for all the different kernels implemented in Gromacs.
+
+What have we achieved?
+We've avoided future maintenance headaches by not writing a fragile translation layer, routed
+the listed force data flow through type-aware channels with maximum code reuse and control logic
+already baked into the type dispatch, and all of that while leveraging the code from Gromacs that actually matters:
+the force kernels that implement all the physics!
+
+## The fun's only starting now
+
+We're not done yet, howere. The best part is yet to come, stay tuned.
 
 <!--
 **Here is some bold text**
