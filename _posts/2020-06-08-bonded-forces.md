@@ -1,6 +1,6 @@
 ---
 layout: post
-title: Bonded forces in MD simulations
+title: Bonded forces in Gromacs and NBLIB
 subtitle: Rewiring the dataflow in Gromac's implementation of bonded forces
 #gh-repo: daattali/beautiful-jekyll
 #gh-badge: [star, fork, follow]
@@ -54,6 +54,7 @@ in the NBLIB topology looks like this:
 ```c++
 using ListedInteractions = std::tuple<InteractionData<HarmonicBond>, ..., InteractionData<HarmonicAngle>, ...>;
 ```
+&nbsp;
 
 ## Listed interactions in Gromacs
 
