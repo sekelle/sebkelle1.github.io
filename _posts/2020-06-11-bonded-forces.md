@@ -49,7 +49,7 @@ struct HarmonicBond : public std::tuple<real, real>
 ```
 The `Index` traits class deduces to `std::array<int, 3>`, because for each harmonic bond, we need two `int`s
 for the coordinate indices and a third `int` to look up the bond parameters in the `parameters` vector.
-For bonds and dihedrals, the `Index` trait adds an additional one or two `int`s to hold the additional coordinate indices.
+For angles and dihedrals, the `Index` trait adds an additional one or two `int`s to hold the additional coordinate indices.
 Finally, each type of interaction is stored in a `std::tuple`, such that the complete definition of all listed forces
 in the NB-LIB topology looks like this:
 
@@ -81,7 +81,7 @@ NB-LIB has a different _(C++)-type_ for each interaction type while GROMACS uses
 ## To convert or not to convert?
 
 It seemed like a straight forward thing to implement. We were going to write a translation function
-to convert from `ListedInteractions` to Gromac's `InteractionDefinitions`, call `calc_listed(const InteractionDefinitions& idef)`
+to convert from `ListedInteractions` to GROMACS' `InteractionDefinitions`, call `calc_listed(const InteractionDefinitions& idef)`
 and voilà, there's our listed forces.
 
 Pretty soon, however, we began to have some doubts. The fact that such a conversion would rely on many
