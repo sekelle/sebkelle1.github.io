@@ -1,6 +1,6 @@
 ---
 layout: post
-title: Bonded forces in Gromacs and NB-LIB
+title: Bonded forces in GROMACS and NB-LIB
 subtitle: Rewiring the dataflow in Gromac's implementation of bonded forces
 #gh-repo: daattali/beautiful-jekyll
 #gh-badge: [star, fork, follow]
@@ -21,7 +21,7 @@ for an array of input 3D coordinates, for each bond you need a pair of indices t
 the two participating particles plus a handful of parameters like spring constants and equilibrium distances
 to calculate the bond forces. And this works just the same for forces due to angles and dihedrals.
 The commonality between these types of forces is that they act on predefined sets of coordinates. That's why
-in GROMACS, they are called "listed" interactions - there's a list which contains the indices along with the
+in [GROMACS](http://www.gromacs.org/), they are called "listed" interactions - there's a list which contains the indices along with the
 parameters for each bond, angle or dihedral. This list is normally constant during a simulation run and is thus
 considered part of the system topology.
 
@@ -58,9 +58,9 @@ using ListedInteractions = std::tuple<InteractionData<HarmonicBond>, ..., Intera
 ```
 &nbsp;
 
-## Listed interactions in Gromacs
+## Listed interactions in GROMACS
 
-How is the same data stored in Gromacs? The format looks like this:
+How is the same data stored in GROMACS? The format looks like this:
 ```c++
 struct InteractionDefinitions
 {
@@ -71,11 +71,11 @@ struct InteractionDefinitions
 This includes all interaction types, i.e. `t_iparams` is a union type which can hold the parameters of any type.
 Thus `iparams` corresponds to the concatenation of the NB-LIB `parameters` vectors for all interaction types.
 The other member called `il` contains the indices for each interaction type, where `F_NRE` is the number of interaction types
-that Gromacs supports. Just like NB-LIB, Gromacs stores a vector of indices for each type. The only difference
-is that the `value_type` is always `int` for Gromacs, while for NB-LIB, it's `std::array<int, N+1>` for an `N-`center
-interaction type. In summary this means that in Gromacs too, a harmonic bond is represented as three integers, two for the
+that GROMACS supports. Just like NB-LIB, GROMACS stores a vector of indices for each type. The only difference
+is that the `value_type` is always `int` for GROMACS, while for NB-LIB, it's `std::array<int, N+1>` for an `N-`center
+interaction type. In summary this means that in GROMACS too, a harmonic bond is represented as three integers, two for the
 coordinates and a third to look up the bond parameters in a look-up table. But the fundamental difference is:
-NB-LIB has a different _(C++)-type_ for each interaction type while Gromacs uses a single (C++)-type for all kinds of interactions.
+NB-LIB has a different _(C++)-type_ for each interaction type while GROMACS uses a single (C++)-type for all kinds of interactions.
 
 
 ## To convert or not to convert?
@@ -87,7 +87,7 @@ and voilà, there's our listed forces.
 Pretty soon, however, we began to have some doubts. The fact that such a conversion would rely on many
 implementation details, such as the specific positions of each interaction type in the `il` array, for instance, was one concern.
 By design, such a layout translation would be inherently fragile with respect to future changes in the underlying code
-and create a future maintenance burden. Another issue was that `calc_listed`, the entry point to listed forces in Gromacs,
+and create a future maintenance burden. Another issue was that `calc_listed`, the entry point to listed forces in GROMACS,
 had accumulated a lot of "baggage" over the years. For example, the argument signature of `calc_listed` contains a translation
 table to convert from (node)-local to global atom index. This table gets passed all the way down to the kernel level where forces
 for individual bonds are calculated. Its only purpose is to translate the local index to the global one in the
@@ -105,7 +105,7 @@ in an MD code, is basically _everywhere_.
 This means that if we wanted to obtain listed forces in NB-LIB through `calc_listed`, the only realistic option would
 be to create a `t_forcerec` object and fill it with dummy values except for the part actually relevant for bonded forces.
 At this point, we where asking ourselves:
->_What if we rewired the dataflow to feed the NB-LIB interaction data directly to the force kernels in Gromacs?_
+>_What if we rewired the dataflow to feed the NB-LIB interaction data directly to the force kernels in GROMACS?_
 
 In fact, we quickly realized that we'd be doing ourselves a big disservice if we just threw away the interaction types
 by which we'd already neatly grouped all the listed interactions. C++ compilers have become powerful code generators,
@@ -116,7 +116,7 @@ to generate separate code paths optimized and tailored to each listed interactio
 ## A type-aware approach to listed forces
 
 
-In essence, the implementation of `calc_listed(const InteractionDefinitions& idef, ...)` in Gromacs looks like this:
+In essence, the implementation of `calc_listed(const InteractionDefinitions& idef, ...)` in GROMACS looks like this:
 
 ```c++
 void calc_listed(const InteractionDefinitions& idef, ...)
@@ -156,8 +156,8 @@ for (int i = 0; i < interactions.size(); ++i)
 }
 ```
 
-About 20 years ago when Gromacs was first written, the only practicable option would have been to manually unroll the tuple loop.
-Given that there's several dozen different types of interactions implemented in Gromacs, this would have been
+About 20 years ago when GROMACS was first written, the only practicable option would have been to manually unroll the tuple loop.
+Given that there's several dozen different types of interactions implemented in GROMACS, this would have been
 quite cumbersome and the union data type and function pointer table approach for `InteractionDefinitions` was the only
 feasible solution.
 
@@ -283,7 +283,7 @@ std::tuple<T, T> harmonicScalarForce(T k, T x0, T x)
 
 That's it! Not a single `if(ftype)` required.
 From here on, we just had to add a separate dispatch for the 3- to 5-center interactions
-and add the type-aware wrappers for all the different kernels implemented in Gromacs.
+and add the type-aware wrappers for all the different kernels implemented in GROMACS.
 
 What have we achieved? We've
 * avoided future maintenance headaches by not writing a fragile translation layer
@@ -291,7 +291,7 @@ What have we achieved? We've
 * maximum code reuse and
 * control logic already baked into the type dispatch
 
-And all of the above while leveraging the code from Gromacs that actually matters:
+And all of the above while leveraging the code from GROMACS that actually matters:
 the force kernels that implement all the physics!
 
 
@@ -307,7 +307,7 @@ types of interactions that involve these two coordinates. Seems like we have jus
 ### A quick roofline analysis
 
 To address the first question, consider a simple harmonic bond for instance.
-In the [Gromacs source](https://gitlab.com/gromacs/gromacs/-/blob/master/src/gromacs/listed_forces/bonded.cpp#L450),
+In the [GROMACS source](https://gitlab.com/gromacs/gromacs/-/blob/master/src/gromacs/listed_forces/bonded.cpp#L450),
 we can see that each
 of them costs 59 flops, which drops to 46 if we use the version above that doesn't do free energy perturbation.
 How many bytes of data do we have to access for that? Assuming single precision,
@@ -370,8 +370,8 @@ and calculating virials and free energy perturbations (FEP).
 
 The calculation of free energies, or more precisely, the derivative of the potential energy with respect to &lambda;, which interpolates
 between two system states A and B, deserves a mention here.
-In Gromacs, each interaction type that supports FEP actually has two sets of parameters, one for the A state and an other one for the B state.
-The additional memory for the B state is always there in Gromacs, whether the user wants to do FEP or not. 
+In GROMACS, each interaction type that supports FEP actually has two sets of parameters, one for the A state and an other one for the B state.
+The additional memory for the B state is always there in GROMACS, whether the user wants to do FEP or not. 
 
 Instead of adding a second B state to each interaction, one could also envisage just having two separate interactions for the A and B state.
 The advantage of that approach would be that the B state could be absent if the user doesn't want to do FEP. Also we'd be saving a lot of
@@ -386,6 +386,6 @@ std::tuple<T, T, T> harmonicScalarForce(T kA, T kB, T xA, T xB, T x, T lambda);
 // return is <F, V, dV/dl>
 ```
 
-Of course, these kernels already exist in Gromacs.
+Of course, these kernels already exist in GROMACS.
 
 With that I'd like to conclude and thank the whole NB-LIB team for the productive last two weeks.
